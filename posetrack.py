@@ -34,10 +34,12 @@ def convert(vann):
             if not pann['annopoints']:
                 continue
             for kpt in pann['annopoints'][0]['point']:
-                if kpt['is_visible'][0]:
-                    kpts.append([kpt['y'][0] / h, kpt['x'][0] / w])
-                    idxs.append(kpt['id'][0])
-                    tags.append(tag)
+                x, y = kpt['x'][0], kpt['y'][0]
+                if not kpt['is_visible'][0]:
+                    continue
+                kpts.append([y / h, x / w])
+                idxs.append(kpt['id'][0])
+                tags.append(tag)
 
         result.append({
             'image_name': img_name,
@@ -52,7 +54,7 @@ def convert(vann):
     return result
 
 
-def pt_plot(img, anno, ax, origin_size=True):
+def pt_plot(img, anno, ax, origin_size=False, draw_outside=False):
     if len(anno['kpts']) == 0:
         print('No keypoints')
         ax.imshow(img)
@@ -74,15 +76,26 @@ def pt_plot(img, anno, ax, origin_size=True):
         ('Lhip', 'Lkne'), ('Lkne', 'Lakl'), ('Rhip', 'Rkne'), ('Rkne', 'Rakl'),
     ]
 
+    kpts = np.float32(anno['kpts'])
+    tags = np.int32(anno['tags'])
+    idxs = np.int32(anno['idxs'])
+
+    if not draw_outside:
+        mask_r = (0 <= kpts[:, 0]) & (kpts[:, 0] < 1.0)
+        mask_c = (0 <= kpts[:, 1]) & (kpts[:, 1] < 1.0)
+        mask = mask_r & mask_c
+        kpts = kpts[mask, :]
+        tags = tags[mask]
+        idxs = idxs[mask]
+
     if origin_size:
         w, h = anno['image_width'], anno['image_height']
         img = img.resize((w, h))
     else:
         w, h = img.size
-    kpts = np.float32(anno['kpts']) * np.float32([h, w])
-    boxs = np.float32(anno['boxs']) * np.float32([h, w, h, w])
-    tags = np.int32(anno['tags'])
-    idxs = np.int32(anno['idxs'])
+    kpts = kpts * np.float32([h, w])
+
+
 
     ax.axis('off')
     ax.imshow(img)
@@ -93,9 +106,6 @@ def pt_plot(img, anno, ax, origin_size=True):
             mask = (tags == i) & ((idxs == index[s]) | (idxs == index[t]))
             pos = kpts[mask]
             ax.plot(pos[:, 1], pos[:, 0], c=colors[i % 20])
-        # y, x, h, w = boxs[i]
-        # rect = mpl.patches.Rectangle((x, y), w, h, fill=False, ec=colors[i % 20], lw=1)
-        # ax.add_patch(rect)
 
 
 class PoseTrack:
@@ -169,9 +179,8 @@ if __name__ == '__main__':
 
     ds = PoseTrack(ROOT_DIR, './pt17/train/')
     print(len(ds))
-
-    img1, img2, ann1, ann2 = ds[20]
-    fig, ax = plt.subplots(1, 2, dpi=100, figsize=(20, 10))
+    img1, img2, ann1, ann2 = ds[2000]
+    fig, ax = plt.subplots(1, 2, sharey=True, dpi=100, figsize=(16, 8))
     pt_plot(F.to_pil_image(img1), ann1, ax[0])
     pt_plot(F.to_pil_image(img2), ann2, ax[1])
     fig.tight_layout()

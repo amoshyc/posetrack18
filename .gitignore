@@ -1,6 +1,7 @@
 data/
 gt17/
 pt17/
+.vscode/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

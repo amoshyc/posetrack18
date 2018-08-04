@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 plt.style.use('seaborn')
 from tqdm import tqdm
 
+
 def parse_coco(src_path, dst_path):
     def extract(annos, h, w):
         kpts, tags, idxs, boxs = [], [], [], []
@@ -124,10 +125,10 @@ class COCOSiameseTag:
 if __name__ == '__main__':
     # for mode in ['train', 'val']:
     #     src_path = Path(f'/store/COCO/annotations/person_keypoints_{mode}2017.json')
-    #     dst_path = Path(f'./data/{mode}2017.json')
+    #     dst_path = Path(f'./data/coco_{mode}2017.json')
     #     parse_coco(src_path, dst_path)
 
-    with open('./data/val2017.json') as f:
+    with open('./data/coco_val2017.json') as f:
         data = json.load(f)
     for anno in data:
         if anno['n_people'] > 4:

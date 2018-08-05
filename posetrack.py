@@ -95,8 +95,6 @@ def pt_plot(img, anno, ax, origin_size=False, draw_outside=False):
         w, h = img.size
     kpts = kpts * np.float32([h, w])
 
-
-
     ax.axis('off')
     ax.imshow(img)
     for i in range(anno['n_people']):
@@ -109,7 +107,7 @@ def pt_plot(img, anno, ax, origin_size=False, draw_outside=False):
 
 
 class PoseTrack:
-    def __init__(self, img_dir, ann_dir, img_size=(320, 320)):
+    def __init__(self, img_dir, ann_dir, img_size=(256, 256)):
         self.img_dir = Path(img_dir)
         self.ann_dir = Path(ann_dir)
         self.img_size = img_size
@@ -120,8 +118,8 @@ class PoseTrack:
             with vann_path.open() as f:
                 vann = json.load(f)
             ids = [(vid, fid) for fid, fann in enumerate(vann) if len(fann['kpts']) > 0]
-            for i in range(len(ids)):
-                for j in range(i, len(ids)):  # min(i + 5, len(ids))
+            for i in range(len(ids) - 6):
+                for j in [i, i + 3, i + 6]:
                     self.pairs.append((ids[i], ids[j]))
             self.vanns.append(vann)
 
@@ -148,10 +146,6 @@ class PoseTrack:
         ann1_batch = list([datum[2] for datum in batch])
         ann2_batch = list([datum[3] for datum in batch])
         return img1_batch, img2_batch, ann1_batch, ann2_batch
-
-    @staticmethod
-    def plot_batch(img1_batch, img2_batch, ann1_batch, ann2_batch):
-        pass
 
 
 

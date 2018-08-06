@@ -9,6 +9,10 @@ import matplotlib.pyplot as plt
 plt.style.use('seaborn')
 from tqdm import tqdm
 
+import torch
+from torch.utils.data import DataLoader
+from torchvision.transforms import functional as F
+
 
 def parse_coco(src_path, dst_path):
     def extract(annos, h, w):
@@ -105,36 +109,54 @@ def coco_plot(img, anno, ax):
         ax.add_patch(rect)
 
 
-class COCOSiameseTag:
-    def __init__(self, image_dir, json_path, img_size, hmp_size, mode='train'):
-        self.image_dir = Path(image_dir)
-        self.json_path = Path(json_path)
+class COCOKeypoint:
+    def __init__(self, img_dir, ann_path, img_size):
+        self.img_dir = Path(img_dir)
+        self.ann_path = Path(ann_path)
         self.img_size = img_size
-        self.hmp_size = hmp_size
+        with self.ann_path.open() as f:
+            self.anns = json.load(f)
 
     def __len__(self):
-        pass
+        return len(self.anns)
 
     def __getitem__(self, idx):
-        pass
+        ann = self.anns[idx]
+        img = Image.open(self.img_dir / ann['image_name']).convert('RGB')
+        img = F.to_tensor(F.resize(img, self.img_size))
+        return img, ann
 
-    def _make_pair(self, img, kpt):
-        pass
+    @staticmethod
+    def collate_fn(batch):
+        img_batch = torch.stack([item[0] for item in batch], dim=0)
+        ann_batch = list([item[1] for item in batch])
+        return img_batch, ann_batch
 
 
 if __name__ == '__main__':
-    # for mode in ['train', 'val']:
-    #     src_path = Path(f'/store/COCO/annotations/person_keypoints_{mode}2017.json')
-    #     dst_path = Path(f'./data/coco_{mode}2017.json')
-    #     parse_coco(src_path, dst_path)
+    # src_path = Path(f'/store/COCO/annotations/person_keypoints_train2017.json')
+    # dst_path = Path(f'./coco/train.json')
+    # parse_coco(src_path, dst_path)
+    # src_path = Path(f'/store/COCO/annotations/person_keypoints_val2017.json')
+    # dst_path = Path(f'./coco/valid.json')
+    # parse_coco(src_path, dst_path)
 
-    with open('./data/coco_val2017.json') as f:
-        data = json.load(f)
-    for anno in data:
-        if anno['n_people'] > 4:
-            break
-    img_path = f'/store/COCO/val2017/{anno["image_name"]}'
-    img = Image.open(img_path)
-    fig, ax = plt.subplots(dpi=100)
-    coco_plot(img, anno, ax)
-    plt.show()
+    img_dir = '/store/COCO/val2017/'
+    ann_path = './coco/valid.json'
+    ds = COCOKeypoint(img_dir, ann_path, (256, 256))
+    print(len(ds))
+    dl = DataLoader(ds, batch_size=2, collate_fn=COCOKeypoint.collate_fn)
+    img_batch, ann_batch = next(iter(dl))
+    print(img_batch.size())
+    print(len(ann_batch))
+
+    # with open('./coco/valid.json') as f:
+    #     data = json.load(f)
+    # for anno in data:
+    #     if anno['n_people'] > 4:
+    #         break
+    # img_path = f'/store/COCO/val2017/{anno["image_name"]}'
+    # img = Image.open(img_path)
+    # fig, ax = plt.subplots(dpi=100)
+    # coco_plot(img, anno, ax)
+    # plt.show()

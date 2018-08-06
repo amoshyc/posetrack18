@@ -21,31 +21,7 @@ plt.style.use('seaborn')
 from posetrack import PoseTrack
 from util import RunningAverage
 
-class Backbone(nn.Module):
-    def __init__(self):
-        super().__init__()
-        densenet = densenet121(pretrained=True)
-        self.pre = nn.Sequential(
-            nn.BatchNorm2d(3),
-        )
-        self.features = densenet.features
-        self.post = nn.Sequential(
-            nn.ConvTranspose2d(1024, 512, (2, 2), stride=2),
-            nn.ConvTranspose2d(512, 256, (2, 2), stride=2),
-            nn.ConvTranspose2d(256, 128, (2, 2), stride=2),
-            nn.Conv2d(128, 3, (1, 1)),
-            nn.BatchNorm2d(3),
-            nn.Tanh()
-        )
-
-    def forward(self, x):
-        x = self.pre(x)
-        x = self.features(x)
-        x = self.post(x)
-        return x
-
-
-class TagLoss(nn.Module):
+class SiameseTagLoss(nn.Module):
     def __init__(self):
         super().__init__()
 
@@ -109,14 +85,14 @@ class PoseTracker:
 
         self.model = Backbone().to(device)
         self.optim = torch.optim.Adam(self.model.parameters(), lr=0.001)
-        self.criterion = TagLoss()
+        self.criterion = SiameseTagLoss()
 
     def fit(self, train_set, valid_set, vis_set, epoch=100):
-        self.train_loader = DataLoader(train_set, batch_size=20,
+        self.train_loader = DataLoader(train_set, batch_size=16,
             shuffle=True, collate_fn=PoseTrack.collate_fn, num_workers=4)
-        self.valid_loader = DataLoader(valid_set, batch_size=20,
+        self.valid_loader = DataLoader(valid_set, batch_size=16,
             shuffle=False, collate_fn=PoseTrack.collate_fn, num_workers=4)
-        self.vis_loader = DataLoader(vis_set, batch_size=20,
+        self.vis_loader = DataLoader(vis_set, batch_size=16,
             shuffle=False, collate_fn=PoseTrack.collate_fn, num_workers=4)
 
         self.log = pd.DataFrame()
@@ -188,15 +164,15 @@ class PoseTracker:
             ebd2_batch = self.model(img2_batch)
             ebd1_batch = F.upsample(ebd1_batch, (H, W))
             ebd2_batch = F.upsample(ebd2_batch, (H, W))
-            ebd1_batch = ebd1_batch * 0.5 + 0.5
-            ebd2_batch = ebd2_batch * 0.5 + 0.5
+            ebd1_batch = ebd1_batch * 0.45 + 0.5
+            ebd2_batch = ebd2_batch * 0.45 + 0.5
 
             for img1, img2, ebd1, ebd2 in \
                 zip(img1_batch, img2_batch, ebd1_batch, ebd2_batch):
                 vis1 = img1 * 0.5 + ebd1 * 0.5
                 vis2 = img2 * 0.5 + ebd2 * 0.5
                 path = f'{self.epoch_dir}/{idx:05d}.jpg'
-                save_image([vis1, vis2], path, pad_value=1)
+                save_image([img1, ebd1, vis1, img2, ebd2, vis2], path, nrow=3, pad_value=1)
                 idx += 1
 
     def _log(self):
@@ -213,17 +189,22 @@ class PoseTracker:
         torch.save(self.model, str(self.epoch_dir / 'model.pth'))
 
 
+
 if __name__ == '__main__':
     root_dir = '/store/PoseTrack2017/posetrack_data/'
 
     PTtrain = PoseTrack(root_dir, './pt17/train/', (256, 256))
     PTvalid = PoseTrack(root_dir, './pt17/valid/', (256, 256))
+    train_vis = [randint(0, len(PTtrain) - 1) for _ in range(50)]
+    valid_vis = [randint(0, len(PTvalid) - 1) for _ in range(50)]
     PTvis = ConcatDataset([
-        Subset(PTtrain, [randint(0, len(PTtrain) - 1) for _ in range(50)]),
-        Subset(PTvalid, [randint(0, len(PTvalid) - 1) for _ in range(50)])
+        Subset(PTtrain, train_vis),
+        Subset(PTvalid, valid_vis)
     ])
     print('#Train:', len(PTtrain))
     print('#Valid:', len(PTvalid))
+    print('Train Vis:', train_vis)
+    print('Valid Vis:', valid_vis)
 
     log_dir = Path(f'./log/{datetime.now():%m-%d %H:%M:%S}/')
     device = torch.device('cuda')

@@ -1,4 +1,5 @@
 import json
+from random import randint
 from pathlib import Path
 from collections import defaultdict
 
@@ -11,7 +12,28 @@ from tqdm import tqdm
 
 import torch
 from torch.utils.data import DataLoader
+from torchvision import transforms as T
 from torchvision.transforms import functional as F
+from torchvision.utils import save_image
+
+from util import Annotation as A
+
+COCO_INDEX = dict((x, i) for i, x in enumerate([
+    'nose', 'Leye', 'Reye', 'Lear', 'Rear', 'Lshd', 'Rshd', 'Lebw', 'Rebw',
+    'Lwrt', 'Rwrt', 'Lhip', 'Rhip', 'Lkne', 'Rkne', 'Lakl', 'Rakl'
+]))
+COCO_EDGES = [
+    # face
+    ('Lear', 'Leye'), ('Leye', 'nose'),
+    ('Leye', 'Reye'), ('Reye', 'nose'), ('Reye', 'Rear'),
+    # upper body
+    ('Leye', 'Lshd'), ('Lshd', 'Lebw'), ('Lebw', 'Lwrt'),
+    ('Reye', 'Rshd'), ('Rshd', 'Rebw'), ('Rebw', 'Rwrt'),
+    # torso
+    ('Lshd', 'Lhip'), ('Lhip', 'Rhip'), ('Rhip', 'Rshd'), ('Rshd', 'Lshd'),
+    # lower body
+    ('Lhip', 'Lkne'), ('Lkne', 'Lakl'), ('Rhip', 'Rkne'), ('Rkne', 'Rakl'),
+]
 
 
 def parse_coco(src_path, dst_path):
@@ -78,35 +100,19 @@ def coco_plot(img, anno, ax):
 
     colors = plt.cm.tab20(np.linspace(0.0, 1.0, 20))
     colors = [mpl.colors.to_hex(c) for c in colors]
-    index = dict((x, i) for i, x in enumerate([
-        'nose', 'Leye', 'Reye', 'Lear', 'Rear', 'Lshd', 'Rshd', 'Lebw', 'Rebw',
-        'Lwrt', 'Rwrt', 'Lhip', 'Rhip', 'Lkne', 'Rkne', 'Lakl', 'Rakl'
-    ]))
-    edges = [
-        # face
-        ('Lear', 'Leye'), ('Leye', 'nose'),
-        ('Leye', 'Reye'), ('Reye', 'nose'), ('Reye', 'Rear'),
-        # upper body
-        ('Leye', 'Lshd'), ('Lshd', 'Lebw'), ('Lebw', 'Lwrt'),
-        ('Reye', 'Rshd'), ('Rshd', 'Rebw'), ('Rebw', 'Rwrt'),
-        # torso
-        ('Lshd', 'Lhip'), ('Lhip', 'Rhip'), ('Rhip', 'Rshd'), ('Rshd', 'Lshd'),
-        # lower body
-        ('Lhip', 'Lkne'), ('Lkne', 'Lakl'), ('Rhip', 'Rkne'), ('Rkne', 'Rakl'),
-    ]
 
     ax.axis('off')
     ax.imshow(img)
     for i in range(anno['n_people']):
         kpt = kpts[(tags == i)]
         ax.plot(kpt[:, 1], kpt[:, 0], '.', c=colors[i % 20])
-        for (s, t) in edges:
-            mask = (tags == i) & ((idxs == index[s]) | (idxs == index[t]))
+        for (s, t) in COCO_EDGES:
+            mask = (tags == i) & ((idxs == COCO_INDEX[s]) | (idxs == COCO_INDEX[t]))
             pos = kpts[mask]
             ax.plot(pos[:, 1], pos[:, 0], c=colors[i % 20])
-        y, x, h, w = boxs[i]
-        rect = mpl.patches.Rectangle((x, y), w, h, fill=False, ec=colors[i % 20], lw=1)
-        ax.add_patch(rect)
+        # y, x, h, w = boxs[i]
+        # rect = mpl.patches.Rectangle((x, y), w, h, fill=False, ec=colors[i % 20], lw=1)
+        # ax.add_patch(rect)
 
 
 class COCOKeypoint:
@@ -115,7 +121,13 @@ class COCOKeypoint:
         self.ann_path = Path(ann_path)
         self.img_size = img_size
         with self.ann_path.open() as f:
-            self.anns = json.load(f)
+            data = json.load(f)
+        self.anns = [ann for ann in data if ann['n_people'] >= 2]
+        self.extend_edges = [(COCO_INDEX[s], COCO_INDEX[t]) for (s, t) in [
+            ('Lshd', 'Rhip'), ('Rshd', 'Lhip'), ('Rshd', 'Lshd'),
+            ('Lshd', 'Lebw'), ('Lebw', 'Lwrt'), ('Rshd', 'Rebw'), ('Rebw', 'Rwrt'),
+            ('Lhip', 'Lkne'), ('Lkne', 'Lakl'), ('Rhip', 'Rkne'), ('Rkne', 'Rakl')
+        ]]
 
     def __len__(self):
         return len(self.anns)
@@ -124,7 +136,19 @@ class COCOKeypoint:
         ann = self.anns[idx]
         img = Image.open(self.img_dir / ann['image_name']).convert('RGB')
         img = F.to_tensor(F.resize(img, self.img_size))
+        ann = A.extend(ann, self.extend_edges, 4)
         return img, ann
+
+    def transform(self, img, ann):
+        if randint(0, 1) == 0:
+            img = F.hflip(img)
+            ann = A.hflip(img)
+
+        if randint(0, 3) == 0:
+            img = F.to_grayscale(img)
+        else:
+            img = T.ColorJitter(0.3, 0.3, 0.2)(img)
+
 
     @staticmethod
     def collate_fn(batch):
@@ -145,18 +169,18 @@ if __name__ == '__main__':
     ann_path = './coco/valid.json'
     ds = COCOKeypoint(img_dir, ann_path, (256, 256))
     print(len(ds))
-    dl = DataLoader(ds, batch_size=2, collate_fn=COCOKeypoint.collate_fn)
-    img_batch, ann_batch = next(iter(dl))
-    print(img_batch.size())
-    print(len(ann_batch))
+    # dl = DataLoader(ds, batch_size=2, collate_fn=COCOKeypoint.collate_fn)
+    # img_batch, ann_batch = next(iter(dl))
+    # print(img_batch.size())
+    # print(len(ann_batch))
 
-    # with open('./coco/valid.json') as f:
-    #     data = json.load(f)
-    # for anno in data:
-    #     if anno['n_people'] > 4:
-    #         break
-    # img_path = f'/store/COCO/val2017/{anno["image_name"]}'
-    # img = Image.open(img_path)
+    for i in [0, 1, 2, 3]:
+        img, ann = ds[i]
+        img = A.draw(img, ann)
+        save_image([img], f'./test{i}.jpg')
+
+    # img, ann = ds[6]
+    # img = F.to_pil_image(img)
     # fig, ax = plt.subplots(dpi=100)
-    # coco_plot(img, anno, ax)
+    # coco_plot(img, ann, ax)
     # plt.show()

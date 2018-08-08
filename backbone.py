@@ -21,44 +21,59 @@ import matplotlib.pyplot as plt
 plt.style.use('seaborn')
 
 from util import RunningAverage
+from util import Annotation as A
 from coco import COCOKeypoint
 
 class Backbone(nn.Module):
     def __init__(self):
         super().__init__()
+        self.resnet = resnet50(pretrained=True)
         self.pre = nn.Sequential(
             nn.BatchNorm2d(3),
+            self.resnet.conv1,
+            self.resnet.bn1,
+            self.resnet.relu,
+            self.resnet.maxpool,
         )
-        self.features = densenet121(pretrained=True).features
-        self.post = nn.Sequential(
-            nn.ConvTranspose2d(1024, 512, (2, 2), stride=2),
-            # nn.Upsample(scale_factor=2, mode='bilinear'),
-            # nn.Conv2d(1024, 512, (3, 3), padding=1),
+        self.up1 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode='bilinear'),
+            nn.Conv2d(2048, 1024, (3, 3), padding=1),
+            # nn.ConvTranspose2d(2048, 1024, (2, 2), stride=2),
+            nn.BatchNorm2d(1024),
+            nn.ReLU(),
+        )
+        self.up2 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode='bilinear'),
+            nn.Conv2d(1024, 512, (3, 3), padding=1),
+            # nn.ConvTranspose2d(1024, 512, (2, 2), stride=2),
             nn.BatchNorm2d(512),
-            # nn.Tanh(),
-
-            nn.ConvTranspose2d(512, 256, (2, 2), stride=2),
-            # nn.Upsample(scale_factor=2, mode='bilinear'),
-            # nn.Conv2d(512, 256, (3, 3), padding=1),
+            nn.ReLU(),
+        )
+        self.up3 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode='bilinear'),
+            nn.Conv2d(512, 256, (3, 3), padding=1),
+            # nn.ConvTranspose2d(512, 256, (2, 2), stride=2),
             nn.BatchNorm2d(256),
-            # nn.Tanh(),
-
-            nn.ConvTranspose2d(256, 128, (2, 2), stride=2),
-            # nn.Upsample(scale_factor=2, mode='bilinear'),
-            # nn.Conv2d(256, 128, (3, 3), padding=1),
-            nn.BatchNorm2d(128),
-            # nn.Tanh(),
-
-            nn.Conv2d(128, 3, (1, 1)),
+            nn.ReLU(),
+        )
+        self.post = nn.Sequential(
+            nn.Conv2d(256, 3, (1, 1)),
             nn.BatchNorm2d(3),
             nn.Tanh()
         )
 
     def forward(self, x):
         x = self.pre(x)
-        x = self.features(x)
-        # print(x.size())
-        x = self.post(x)
+
+        z1 = self.resnet.layer1(x)
+        z2 = self.resnet.layer2(z1)
+        z3 = self.resnet.layer3(z2)
+        z4 = self.resnet.layer4(z3)
+        z3 = self.up1(z4) + z3
+        z2 = self.up2(z3) + z2
+        z1 = self.up3(z2) + z1
+
+        x = self.post(z1)
         return x
 
 
@@ -87,7 +102,10 @@ class TagLoss(nn.Module):
             expo = ((A - B)**2).mean(dim=0)  # (K, K)
             pred_similarity = 2 / (1 + torch.exp(expo))
 
-            losses[i] = ((true_similarity - pred_similarity)**2).mean()
+            true_similarity = true_similarity.unsqueeze(0)
+            pred_similarity = pred_similarity.unsqueeze(0)
+            losses[i] = F.smooth_l1_loss(pred_similarity, true_similarity)
+            # losses[i] = (true_similarity - pred_similarity).mean()
 
         return losses.mean()
 
@@ -118,7 +136,7 @@ class PoseTagger:
 
     def fit(self, train_set, valid_set, vis_set, epoch=100):
         self.train_loader = DataLoader(train_set, batch_size=32,
-            shuffle=True, collate_fn=COCOKeypoint.collate_fn, num_workers=4)
+            shuffle=True, collate_fn=COCOKeypoint.collate_fn, num_workers=6)
         self.valid_loader = DataLoader(valid_set, batch_size=32,
             shuffle=False, collate_fn=COCOKeypoint.collate_fn, num_workers=4)
         self.vis_loader = DataLoader(vis_set, batch_size=32,
@@ -177,16 +195,16 @@ class PoseTagger:
         self.model.eval()
         idx = 0
         for img_batch, ann_batch in iter(self.vis_loader):
-            img_batch = img_batch.to(self.device)
-            ebd_batch = self.model(img_batch)
+            ebd_batch = self.model(img_batch.to(self.device)).cpu()
             _, _, H, W = img_batch.size()
             ebd_batch = F.upsample(ebd_batch, (H, W))
             ebd_batch = ebd_batch * 0.45 + 0.5
 
-            for img, ebd in zip(img_batch, ebd_batch):
+            for img, ann, ebd in zip(img_batch, ann_batch, ebd_batch):
+                kpt = A.draw(img, ann)
                 vis = img * 0.5 + ebd * 0.5
                 path = f'{self.epoch_dir}/{idx:05d}.jpg'
-                save_image([img, ebd, vis], path, nrow=3, pad_value=1)
+                save_image([img, kpt, ebd, vis], path, nrow=4, pad_value=1)
                 idx += 1
 
     def _log(self):

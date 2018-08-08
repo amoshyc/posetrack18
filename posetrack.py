@@ -118,8 +118,8 @@ class PoseTrack:
             with vann_path.open() as f:
                 vann = json.load(f)
             ids = [(vid, fid) for fid, fann in enumerate(vann) if len(fann['kpts']) > 0]
-            for i in range(len(ids) - 6):
-                for j in [i, i + 3, i + 6]:
+            for i in range(0, len(ids) - 6, 2):
+                for j in [i + 2, i + 6]:
                     self.pairs.append((ids[i], ids[j]))
             self.vanns.append(vann)
 

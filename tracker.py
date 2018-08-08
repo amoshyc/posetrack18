@@ -78,21 +78,21 @@ class SiameseTagLoss(nn.Module):
 
 
 class PoseTracker:
-    def __init__(self, log_dir, device):
+    def __init__(self, log_dir, device, backbone):
         self.device = device
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(exist_ok=True, parents=True)
 
-        self.model = Backbone().to(device)
+        self.model = backbone.to(device)
         self.optim = torch.optim.Adam(self.model.parameters(), lr=0.001)
         self.criterion = SiameseTagLoss()
 
     def fit(self, train_set, valid_set, vis_set, epoch=100):
-        self.train_loader = DataLoader(train_set, batch_size=16,
+        self.train_loader = DataLoader(train_set, batch_size=20,
             shuffle=True, collate_fn=PoseTrack.collate_fn, num_workers=4)
-        self.valid_loader = DataLoader(valid_set, batch_size=16,
+        self.valid_loader = DataLoader(valid_set, batch_size=20,
             shuffle=False, collate_fn=PoseTrack.collate_fn, num_workers=4)
-        self.vis_loader = DataLoader(vis_set, batch_size=16,
+        self.vis_loader = DataLoader(vis_set, batch_size=20,
             shuffle=False, collate_fn=PoseTrack.collate_fn, num_workers=4)
 
         self.log = pd.DataFrame()

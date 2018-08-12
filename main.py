@@ -11,8 +11,8 @@ from backbone import PoseTagger
 
 train_img_dir = '/store/COCO/train2017/'
 valid_img_dir = '/store/COCO/val2017/'
-COCOtrain = COCOKeypoint(train_img_dir, './coco/train.json', (256, 256))
-COCOvalid = COCOKeypoint(valid_img_dir, './coco/valid.json', (256, 256))
+COCOtrain = COCOKeypoint(train_img_dir, './coco/train.json', (320, 320), mode='train')
+COCOvalid = COCOKeypoint(valid_img_dir, './coco/valid.json', (320, 320), mode='eval')
 train_vis = [randint(0, len(COCOtrain) - 1) for _ in range(50)]
 valid_vis = [randint(0, len(COCOvalid) - 1) for _ in range(50)]
 COCOvis = ConcatDataset([

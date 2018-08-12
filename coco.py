@@ -4,7 +4,6 @@ from pathlib import Path
 from collections import defaultdict
 
 import numpy as np
-from PIL import Image
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 plt.style.use('seaborn')
@@ -12,11 +11,17 @@ from tqdm import tqdm
 
 import torch
 from torch.utils.data import DataLoader
-from torchvision import transforms as T
-from torchvision.transforms import functional as F
-from torchvision.utils import save_image
+import skimage
+from skimage import io
+from skimage import color
+from skimage import transform
 
-from util import Annotation as A
+import imgaug as ia
+from imgaug import augmenters as iaa
+ia.seed(42)
+
+import util
+
 
 COCO_INDEX = dict((x, i) for i, x in enumerate([
     'nose', 'Leye', 'Reye', 'Lear', 'Rear', 'Lshd', 'Rshd', 'Lebw', 'Rebw',
@@ -116,39 +121,79 @@ def coco_plot(img, anno, ax):
 
 
 class COCOKeypoint:
-    def __init__(self, img_dir, ann_path, img_size):
+    def __init__(self, img_dir, ann_path, img_size, mode='eval'):
         self.img_dir = Path(img_dir)
         self.ann_path = Path(ann_path)
         self.img_size = img_size
+        self.mode = mode
         with self.ann_path.open() as f:
-            data = json.load(f)
-        self.anns = [ann for ann in data if ann['n_people'] >= 2]
-        self.extend_edges = [(COCO_INDEX[s], COCO_INDEX[t]) for (s, t) in [
-            ('Lshd', 'Rhip'), ('Rshd', 'Lhip'), ('Rshd', 'Lshd'),
-            ('Lshd', 'Lebw'), ('Lebw', 'Lwrt'), ('Rshd', 'Rebw'), ('Rebw', 'Rwrt'),
-            ('Lhip', 'Lkne'), ('Lkne', 'Lakl'), ('Rhip', 'Rkne'), ('Rkne', 'Rakl')
-        ]]
+            self.anns = json.load(f)
+
+        self.train_aug = iaa.Sequential([
+            iaa.Fliplr(0.5),
+            iaa.Affine(rotate=10, scale=(1.0, 1.5)),
+            iaa.Scale({
+                "height": self.img_size[0],
+                "width": self.img_size[1]
+            }),
+            iaa.AdditiveGaussianNoise(
+                loc=0, scale=(0.0, 0.05 * 255), per_channel=0.5),
+            iaa.Add((-10, 10), per_channel=0.5),
+            iaa.AddToHueAndSaturation((-20, 20)),
+        ])
+        self.eval_aug = iaa.Sequential([
+            iaa.Scale({
+                "height": self.img_size[0],
+                "width": self.img_size[1]
+            })
+        ])
 
     def __len__(self):
         return len(self.anns)
 
     def __getitem__(self, idx):
         ann = self.anns[idx]
-        img = Image.open(self.img_dir / ann['image_name']).convert('RGB')
-        img = F.to_tensor(F.resize(img, self.img_size))
-        ann = A.extend(ann, self.extend_edges, 4)
+        img_path = self.img_dir / ann['image_name']
+        img = io.imread(str(img_path))
+        if img.ndim == 2:
+            img = color.gray2rgb(img)
+
+        if self.mode == 'train':
+            img, ann = self.train_transform(img, ann)
+        if self.mode == 'eval':
+            img, ann = self.eval_transform(img, ann)
+        img = skimage.img_as_float(img)
+
         return img, ann
 
-    def transform(self, img, ann):
-        if randint(0, 1) == 0:
-            img = F.hflip(img)
-            ann = A.hflip(img)
+    def train_transform(self, img, ann):
+        aug = self.train_aug.to_deterministic()
 
-        if randint(0, 3) == 0:
-            img = F.to_grayscale(img)
-        else:
-            img = T.ColorJitter(0.3, 0.3, 0.2)(img)
+        kpts = np.float32(ann['kpts'])
+        tags = np.int32(ann['tags'])
+        idxs = np.int32(ann['idxs'])
+        imgH = ann['image_height']
+        imgW = ann['image_width']
 
+        aug_img = aug.augment_images([img])[0]
+        kpts = np.floor(kpts * np.float32([imgH, imgW])).astype(np.int32)
+        src_kpts = ia.KeypointsOnImage.from_coords_array(kpts[:, ::-1], shape=img.shape)
+        aug_kpts = aug.augment_keypoints([src_kpts])[0].get_coords_array()[:, ::-1]
+        aug_kpts = aug_kpts / np.float32(self.img_size)
+
+        mask_r = (0 <= aug_kpts[:, 0]) & (aug_kpts[:, 0] < self.img_size[0])
+        mask_c = (0 <= aug_kpts[:, 1]) & (aug_kpts[:, 1] < self.img_size[1])
+        mask = mask_r & mask_c
+
+        aug_ann = ann.copy()
+        aug_ann['kpts'] = aug_kpts[mask].tolist()
+        aug_ann['tags'] = tags[mask].tolist()
+        aug_ann['idxs'] = idxs[mask].tolist()
+        return aug_img, aug_ann
+
+    def eval_transform(self, img, ann):
+        img = transform.resize(img, self.img_size, mode='reflect')
+        return img, ann
 
     @staticmethod
     def collate_fn(batch):
@@ -167,17 +212,20 @@ if __name__ == '__main__':
 
     img_dir = '/store/COCO/val2017/'
     ann_path = './coco/valid.json'
-    ds = COCOKeypoint(img_dir, ann_path, (256, 256))
+    ds = COCOKeypoint(img_dir, ann_path, (256, 256), mode='train')
     print(len(ds))
     # dl = DataLoader(ds, batch_size=2, collate_fn=COCOKeypoint.collate_fn)
     # img_batch, ann_batch = next(iter(dl))
     # print(img_batch.size())
     # print(len(ann_batch))
 
-    for i in [0, 1, 2, 3]:
-        img, ann = ds[i]
-        img = A.draw(img, ann)
-        save_image([img], f'./test{i}.jpg')
+    img1, ann1 = ds[2]
+    img2, ann2 = ds[3]
+    vis1 = util.draw_ann(img1, ann1)
+    vis2 = util.draw_ann(img2, ann2)
+    io.imshow_collection([vis1, vis2], grid=None)
+    io.imshow(vis1)
+    io.show()
 
     # img, ann = ds[6]
     # img = F.to_pil_image(img)

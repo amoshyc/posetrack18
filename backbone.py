@@ -20,8 +20,12 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 plt.style.use('seaborn')
 
+from sklearn.preprocessing import minmax_scale
+from sklearn.decomposition import PCA
+
 from util import RunningAverage
 from util import Annotation as A
+from util import pca
 from coco import COCOKeypoint
 
 class Backbone(nn.Module):
@@ -36,29 +40,29 @@ class Backbone(nn.Module):
             self.resnet.maxpool,
         )
         self.up1 = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode='bilinear'),
-            nn.Conv2d(2048, 1024, (3, 3), padding=1),
-            # nn.ConvTranspose2d(2048, 1024, (2, 2), stride=2),
+            # nn.Upsample(scale_factor=2, mode='bilinear'),
+            # nn.Conv2d(2048, 1024, (3, 3), padding=1),
+            nn.ConvTranspose2d(2048, 1024, (2, 2), stride=2),
             nn.BatchNorm2d(1024),
             nn.ReLU(),
         )
         self.up2 = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode='bilinear'),
-            nn.Conv2d(1024, 512, (3, 3), padding=1),
-            # nn.ConvTranspose2d(1024, 512, (2, 2), stride=2),
+            # nn.Upsample(scale_factor=2, mode='bilinear'),
+            # nn.Conv2d(1024, 512, (3, 3), padding=1),
+            nn.ConvTranspose2d(1024, 512, (2, 2), stride=2),
             nn.BatchNorm2d(512),
             nn.ReLU(),
         )
         self.up3 = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode='bilinear'),
-            nn.Conv2d(512, 256, (3, 3), padding=1),
-            # nn.ConvTranspose2d(512, 256, (2, 2), stride=2),
+            # nn.Upsample(scale_factor=2, mode='bilinear'),
+            # nn.Conv2d(512, 256, (3, 3), padding=1),
+            nn.ConvTranspose2d(512, 256, (2, 2), stride=2),
             nn.BatchNorm2d(256),
             nn.ReLU(),
         )
         self.post = nn.Sequential(
-            nn.Conv2d(256, 3, (1, 1)),
-            nn.BatchNorm2d(3),
+            nn.Conv2d(256, 32, (1, 1)),
+            nn.BatchNorm2d(32),
             nn.Tanh()
         )
 
@@ -104,7 +108,7 @@ class TagLoss(nn.Module):
 
             true_similarity = true_similarity.unsqueeze(0)
             pred_similarity = pred_similarity.unsqueeze(0)
-            losses[i] = F.smooth_l1_loss(pred_similarity, true_similarity)
+            losses[i] = F.mse_loss(pred_similarity, true_similarity)
             # losses[i] = (true_similarity - pred_similarity).mean()
 
         return losses.mean()
@@ -135,11 +139,11 @@ class PoseTagger:
         self.criterion = TagLoss()
 
     def fit(self, train_set, valid_set, vis_set, epoch=100):
-        self.train_loader = DataLoader(train_set, batch_size=32,
+        self.train_loader = DataLoader(train_set, batch_size=25,
             shuffle=True, collate_fn=COCOKeypoint.collate_fn, num_workers=6)
-        self.valid_loader = DataLoader(valid_set, batch_size=32,
+        self.valid_loader = DataLoader(valid_set, batch_size=25,
             shuffle=False, collate_fn=COCOKeypoint.collate_fn, num_workers=4)
-        self.vis_loader = DataLoader(vis_set, batch_size=32,
+        self.vis_loader = DataLoader(vis_set, batch_size=25,
             shuffle=False, collate_fn=COCOKeypoint.collate_fn, num_workers=4)
 
         self.log = pd.DataFrame()
@@ -201,8 +205,9 @@ class PoseTagger:
             ebd_batch = ebd_batch * 0.45 + 0.5
 
             for img, ann, ebd in zip(img_batch, ann_batch, ebd_batch):
+                ebd = pca(ebd, n_points=256, n_components=3)
                 kpt = A.draw(img, ann)
-                vis = img * 0.5 + ebd * 0.5
+                vis = img * 0.4 + ebd * 0.6
                 path = f'{self.epoch_dir}/{idx:05d}.jpg'
                 save_image([img, kpt, ebd, vis], path, nrow=4, pad_value=1)
                 idx += 1
@@ -218,4 +223,5 @@ class PoseTagger:
         fig.savefig(str(self.log_dir / 'loss.jpg'))
         plt.close()  # Close plot to prevent RE
         # model
-        torch.save(self.model, str(self.epoch_dir / 'model.pth'))
+        if self.ep == 0 or self.log['val_loss'].min() == self.msg['val_loss']:
+            torch.save(self.model, str(self.epoch_dir / 'model.pth'))

@@ -1,11 +1,10 @@
 from math import ceil
 from copy import copy
+import torch
 import numpy as np
-import matplotlib.pyplot as plt
 import skimage
 from skimage import io
 from skimage import color
-from skimage import draw
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import minmax_scale
 
@@ -47,7 +46,7 @@ def make_grid(arrs, per_row=-1, padding=2, pad_value=0):
     arrs = copy(arrs)
     n_arr = len(arrs)
     for i in range(n_arr):
-        if len(arrs[i].shape) == 2:
+        if arrs[i].ndim == 2:
             arrs[i] = color.gray2rgb(arrs[i])
     for i in range(n_arr):
         if arrs[i].dtype == np.dtype(np.uint8):
@@ -73,18 +72,19 @@ def save_grid(arrs, filename, *args, **kwargs):
     io.imsave(filename, grid, quality=100)
 
 
-def draw_ann(img, ann):
-    kpts = np.int32(ann['kpts'])
-    tags = np.int32(ann['tags'])
+def np2torch(data):
+    if data.ndim == 4:
+        return torch.from_numpy(data.transpose([0, 3, 1, 2]))
+    if data.ndim == 3:
+        return torch.from_numpy(data.transpose([2, 0, 1]))
+    assert False, 'Input should has 3 or 4 dimensions'
 
-    colors = plt.cm.tab20(np.linspace(0, 1, 20))
-    colors = [c[:3] for c in colors]
 
-    img = img.copy()
-    for pid in range(ann['n_people']):
-        person_kpts = kpts[tags == pid]
-        for (r, c) in person_kpts:
-            rr, cc = draw.circle(r, c, 2.1, shape=img.shape)
-            img[rr, cc] = colors[pid % 20]
+def torch2np(data):
+    data = data.numpy()
+    if data.ndim == 4:
+        return data.transpose([0, 2, 3, 1])
+    if data.ndim == 3:
+        return data.transpose([1, 2, 0])
+    assert False, 'Input should has 3 or 4 dimensions'
 
-    return img

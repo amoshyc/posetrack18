@@ -1,6 +1,7 @@
 coco/
 gt17/
 pt17/
+data/
 .vscode/
 log/
 

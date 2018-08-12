@@ -25,7 +25,6 @@ class RunningAverage:
 
 
 def pca(ebd, n_points=256, n_components=3):
-    ebd = ebd.numpy().transpose([1, 2, 0])
     H, W, D = ebd.shape
     randp = np.random.rand(n_points, 2) * np.float32([H, W])
     randp = np.floor(randp).astype(np.int32)
@@ -34,8 +33,7 @@ def pca(ebd, n_points=256, n_components=3):
     pca = PCA(n_components=n_components).fit(randp)
     ebd = pca.transform(ebd.reshape(H * W, D))
     ebd = minmax_scale(ebd).reshape(H, W, -1)
-    ebd = ebd.transpose([2, 0, 1])
-    return torch.from_numpy(ebd)
+    return ebd
 
 
 def make_grid(arrs, per_row=-1, padding=2, pad_value=0):
@@ -57,7 +55,7 @@ def make_grid(arrs, per_row=-1, padding=2, pad_value=0):
     per_col = ceil(n_arr / per_row)
     gridW = per_row * imgW + (per_row - 1) * padding
     gridH = per_col * imgH + (per_col - 1) * padding
-    grid = np.full((gridH, gridH, 3), pad_value, dtype=np.float64)
+    grid = np.full((gridH, gridW, 3), pad_value, dtype=np.float64)
     for i in range(n_arr):
         c = (i % per_row) * (imgW + padding)
         r = (i // per_row) * (imgH + padding)

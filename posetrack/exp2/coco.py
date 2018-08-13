@@ -19,7 +19,7 @@ from skimage import transform
 
 import imgaug as ia
 from imgaug import augmenters as iaa
-ia.seed(42)
+ia.seed(randint(0, 100))
 
 from .. import util
 
